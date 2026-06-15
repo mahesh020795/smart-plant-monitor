@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "851386091751",
+    "firebase_url": "https://smart-plant-monitor-fdddf-default-rtdb.firebaseio.com",
+    "project_id": "smart-plant-monitor-fdddf",
+    "storage_bucket": "smart-plant-monitor-fdddf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:851386091751:android:f23275685f493fbe7b3a42",
+        "android_client_info": {
+          "package_name": "com.mahesh.smartplantmonitor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDAvG7zYVde6QPUiW2g4MUJwV4QnBVTF7s"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

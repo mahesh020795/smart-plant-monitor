@@ -49,14 +49,13 @@
 #define FIRMWARE_VERSION  "1.0.1"
 
 // ─── GitHub OTA URLs ──────────────────────────────────────────────────────
-// Replace YOUR_USERNAME with your actual GitHub username
-#define GITHUB_USERNAME   "YOUR_USERNAME"
-#define GITHUB_REPO       "smart-plant-esp32"
+#define GITHUB_USERNAME   "mahesh020795"
+#define GITHUB_REPO       "smart-plant-monitor"
 
-// Raw URL to version.txt in your repo (update this file on GitHub to trigger OTA)
-#define OTA_VERSION_URL   "https://raw.githubusercontent.com/" GITHUB_USERNAME "/" GITHUB_REPO "/main/version.txt"
+// version.txt in repo root — update this on GitHub to trigger OTA
+#define OTA_VERSION_URL   "https://raw.githubusercontent.com/" GITHUB_USERNAME "/" GITHUB_REPO "/master/version.txt"
 
-// URL to the compiled .bin in GitHub Releases (attach firmware.bin to each release)
+// firmware.bin attached to the latest GitHub Release
 #define OTA_BIN_URL       "https://github.com/" GITHUB_USERNAME "/" GITHUB_REPO "/releases/latest/download/firmware.bin"
 
 // ─── WiFi + Firebase Config ───────────────────────────────────────────────

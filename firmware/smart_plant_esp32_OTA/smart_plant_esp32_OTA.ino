@@ -59,10 +59,10 @@
 #define OTA_BIN_URL       "https://github.com/" GITHUB_USERNAME "/" GITHUB_REPO "/releases/latest/download/firmware.bin"
 
 // ─── WiFi + Firebase Config ───────────────────────────────────────────────
-#define WIFI_SSID       "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
+#define WIFI_SSID       "project123"
+#define WIFI_PASSWORD   "01126502500"
 #define FIREBASE_HOST   "smart-plant-monitor-fdddf-default-rtdb.firebaseio.com"
-#define FIREBASE_AUTH   "YOUR_DATABASE_SECRET"
+#define FIREBASE_AUTH   "Ph8QVKdtDnMzHKLWuPOwR5rH9uhWiTB67JdLkNbc"
 #define USER_UID        "b44mjHqSSeX7ayrZ68H08rPJ0bU2"
 
 // ─── Pin Definitions ──────────────────────────────────────────────────────

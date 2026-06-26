@@ -4,6 +4,7 @@ import '../models/sensor_data.dart';
 import '../models/schedule.dart';
 import '../models/alert.dart';
 import '../services/database_service.dart';
+import '../services/notification_service.dart';
 
 class AppProvider extends ChangeNotifier {
   final _db = DatabaseService.instance;
@@ -53,6 +54,14 @@ class AppProvider extends ChangeNotifier {
     });
 
     _alertSub = _db.alertsStream().listen((list) {
+      // Show local notification when a new alert arrives
+      if (_alerts.isNotEmpty && list.length > _alerts.length) {
+        final newest = list.first;
+        NotificationService.instance.showLocalAlert(
+          '${newest.icon} Smart Plant Alert',
+          newest.message,
+        );
+      }
       _alerts = list;
       notifyListeners();
     });

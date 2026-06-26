@@ -21,7 +21,7 @@ class PlantAlert {
       type: _typeFromString(map['type'] as String? ?? 'info'),
       message: (map['message'] as String?) ?? '',
       timestamp: map['timestamp'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['timestamp'] as int)
+          ? DateTime.fromMillisecondsSinceEpoch((map['timestamp'] as num).toInt())
           : DateTime.now(),
       read: (map['read'] as bool?) ?? false,
     );

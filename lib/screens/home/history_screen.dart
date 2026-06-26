@@ -20,7 +20,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     _ChartField('Air Temp',      'airTemp',      '°C',  Color(0xFFFF7043)),
     _ChartField('Humidity',      'humidity',     '%',   Color(0xFF26A69A)),
     _ChartField('Light',         'lightLux',     'lux', Color(0xFFFFB300)),
-    _ChartField('Water Level',   'waterLevelCm', 'cm',  Color(0xFF1565C0)),
+    _ChartField('Water Level',   'waterLevelPct', '%',  Color(0xFF1565C0)),
     _ChartField('Soil Temp',     'soilTemp',     '°C',  Color(0xFF6D4C41)),
   ];
 

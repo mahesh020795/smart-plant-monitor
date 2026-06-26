@@ -7,53 +7,59 @@
  *  - BH1750 (I2C)        → SDA=GPIO21, SCL=GPIO22
  *  - HC-SR04             → TRIG=GPIO5, ECHO=GPIO18
  *  - DS18B20 (1-Wire)    → GPIO15 (4.7kΩ pullup to 3.3V)
- *  - Relay (pump)        → GPIO2 (LOW = pump ON for active-low relay)
+ *  - Relay (pump)        → GPIO2 (HIGH = pump ON for active-high relay)
  *  - I2C LCD 16x2        → SDA=GPIO21, SCL=GPIO22 (addr 0x27)
  *
  * Libraries required (install via Arduino Library Manager):
- *  - ArduinoJson         (Benoit Blanchon)
  *  - DHT sensor library  (Adafruit)
  *  - BH1750              (Christopher Laws)
  *  - OneWire             (Paul Stoffregen)
  *  - DallasTemperature   (Miles Burton)
  *  - LiquidCrystal_I2C   (Frank de Brabander)
- *  - Firebase ESP Client (Mobizt) — for RTDB + FCM
+ *  - Firebase ESP Client (Mobizt) — for RTDB
  */
 
 #include <WiFi.h>
 #include <FirebaseESP32.h>
+#include <Wire.h>
 #include <DHT.h>
 #include <BH1750.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <LiquidCrystal_I2C.h>
+#include <time.h>
 
 // ─── WiFi + Firebase Config ────────────────────────────────────────────────
-#define WIFI_SSID       "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
-#define FIREBASE_HOST   "YOUR-PROJECT.firebaseio.com"
-#define FIREBASE_AUTH   "YOUR_DATABASE_SECRET_OR_SERVICE_ACCOUNT_TOKEN"
-#define USER_UID        "USER_UID_FROM_FIREBASE_AUTH"   // set after login
+#define WIFI_SSID       "project123"
+#define WIFI_PASSWORD   "01126502500"
+#define FIREBASE_HOST   "smart-plant-monitor-fdddf-default-rtdb.firebaseio.com"
+#define FIREBASE_AUTH   "Ph8QVKdtDnMzHKLWuPOwR5rH9uhWiTB67JdLkNbc"
+#define USER_UID        "b44mjHqSSeX7ayrZ68H08rPJ0bU2"
 
 // ─── Pin Definitions ───────────────────────────────────────────────────────
-#define SOIL_MOISTURE_PIN   34    // ADC1 channel 6
+#define SOIL_MOISTURE_PIN   34
 #define DHT_PIN             4
 #define DHT_TYPE            DHT11
 #define TRIG_PIN            5
 #define ECHO_PIN            18
 #define DS18B20_PIN         15
-#define RELAY_PIN           2     // LOW = pump ON
+#define RELAY_PIN           2     // HIGH = pump ON
 
-// ─── Thresholds (defaults; overridden from Firebase /users/{uid}/settings/thresholds) ──
-float SOIL_DRY_THRESHOLD  = 30.0;
-float WATER_LOW_THRESHOLD =  5.0;
-float TEMP_HIGH_THRESHOLD = 35.0;
+// Soil calibration
+const int SOIL_DRY = 4095;
+const int SOIL_WET = 2100;
+
+// ─── Thresholds (overridden from Firebase /users/{uid}/settings/thresholds) ──
+float SOIL_DRY_THRESHOLD  = 30.0;  // %
+float WATER_LOW_THRESHOLD = 20.0;  // % (was cm, now percentage)
+float TEMP_HIGH_THRESHOLD = 35.0;  // °C
 
 // ─── Intervals ─────────────────────────────────────────────────────────────
-#define SENSOR_INTERVAL_MS    30000  // upload every 30 sec
-#define PUMP_CHECK_MS          5000  // check pump command every 5 sec
-#define SCHEDULE_CHECK_MS     60000  // check schedules every 60 sec
-#define LCD_REFRESH_MS         3000  // rotate LCD display every 3 sec
+#define SENSOR_INTERVAL_MS    30000
+#define PUMP_CHECK_MS          5000
+#define SCHEDULE_CHECK_MS     60000
+#define LCD_REFRESH_MS         3000
+#define SETTINGS_CHECK_MS     30000
 
 // ─── Objects ───────────────────────────────────────────────────────────────
 FirebaseData   fbData;
@@ -71,9 +77,9 @@ float soilMoisturePct = 0;
 float airTempC        = 0;
 float humidityPct     = 0;
 float lightLux        = 0;
-float waterLevelCm    = 0;
+float waterLevelPct   = 0;   // 0–100 %
 float soilTempC       = 0;
-float tankHeightCm    = 25.0;  // overwritten after calibration
+float tankHeightCm    = 25.0;
 bool  pumpRunning     = false;
 String pumpCommand    = "auto";
 
@@ -82,7 +88,6 @@ unsigned long lastPumpCheck     = 0;
 unsigned long lastScheduleCheck = 0;
 unsigned long lastLcdRefresh    = 0;
 unsigned long lastSettingsCheck = 0;
-#define SETTINGS_CHECK_MS  30000
 int           lcdPage           = 0;
 
 // ─── Prototypes ────────────────────────────────────────────────────────────
@@ -91,43 +96,67 @@ void     uploadSensors();
 void     checkPumpCommand();
 void     checkSchedules();
 void     checkSettingsAndCalibration();
+void     checkAlertConditions();
 void     setPump(bool on);
 void     updateLCD();
-float    measureWaterLevel();
+float    measureWaterLevelPct();
 float    readSoilMoisture();
 void     sendFirebaseAlert(const String& type, const String& msg);
 unsigned long epochTime();
+unsigned long localEpochTime();
+unsigned long long epochMillis();
 
 // ═══════════════════════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
 
-  // Outputs
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH); // relay off (active LOW)
+  digitalWrite(RELAY_PIN, LOW); // relay off (active HIGH)
 
-  // Sensors
-  dht.begin();
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+
   Wire.begin(21, 22);
-  lightMeter.begin();
+  dht.begin();
   ds18b20.begin();
 
-  // LCD
+  if (lightMeter.begin()) {
+    Serial.println("[BH1750] OK");
+  } else {
+    Serial.println("[BH1750] FAIL - check SDA(21)/SCL(22) wiring");
+  }
+
+  int dsCount = ds18b20.getDeviceCount();
+  Serial.println(dsCount > 0
+    ? "[DS18B20] OK - " + String(dsCount) + " device(s)"
+    : "[DS18B20] FAIL - check GPIO15 + 4.7k pullup");
+
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0); lcd.print("Smart Plant");
   lcd.setCursor(0, 1); lcd.print("Connecting WiFi");
 
-  // WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting WiFi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500); Serial.print('.');
   }
-  Serial.println("\nWiFi connected: " + WiFi.localIP().toString());
+  Serial.println("\nWiFi: " + WiFi.localIP().toString());
 
-  // Firebase
-  fbConfig.host           = FIREBASE_HOST;
+  // NTP time sync (pool.ntp.org, UTC)
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  lcd.clear();
+  lcd.setCursor(0, 0); lcd.print("Syncing time...");
+  struct tm ti;
+  int retry = 0;
+  while (!getLocalTime(&ti) && retry < 20) { delay(500); retry++; }
+  if (retry < 20) {
+    Serial.println("[NTP] Time synced");
+  } else {
+    Serial.println("[NTP] Sync failed - timestamps may be wrong");
+  }
+
+  fbConfig.host = FIREBASE_HOST;
   fbConfig.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&fbConfig, &fbAuth);
   Firebase.reconnectWiFi(true);
@@ -137,6 +166,11 @@ void setup() {
   lcd.setCursor(0, 0); lcd.print("Firebase OK");
   lcd.setCursor(0, 1); lcd.print(WiFi.localIP().toString());
   delay(2000);
+
+  // Read and upload immediately on boot (no 30s wait)
+  readSensors();
+  uploadSensors();
+  checkAlertConditions();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -173,51 +207,44 @@ void loop() {
 
 // ─── Sensor Reading ────────────────────────────────────────────────────────
 void readSensors() {
-  // DHT11
   float h = dht.readHumidity();
   float t = dht.readTemperature();
   if (!isnan(h)) humidityPct = h;
   if (!isnan(t)) airTempC    = t;
 
-  // BH1750
-  lightLux = lightMeter.readLightLevel();
-
-  // Soil moisture (raw ADC → %)
+  lightLux        = lightMeter.readLightLevel();
   soilMoisturePct = readSoilMoisture();
+  waterLevelPct   = measureWaterLevelPct();
 
-  // HC-SR04 water level
-  waterLevelCm = measureWaterLevel();
-
-  // DS18B20 soil temp
   ds18b20.requestTemperatures();
   float st = ds18b20.getTempCByIndex(0);
   if (st != DEVICE_DISCONNECTED_C) soilTempC = st;
 
   Serial.printf(
-    "Soil:%.1f%% AirT:%.1fC Hum:%.1f%% Lux:%.0f Water:%.1fcm SoilT:%.1fC\n",
-    soilMoisturePct, airTempC, humidityPct, lightLux, waterLevelCm, soilTempC
+    "Soil:%.1f%% AirT:%.1fC Hum:%.1f%% Lux:%.0f Water:%.1f%% SoilT:%.1fC\n",
+    soilMoisturePct, airTempC, humidityPct, lightLux, waterLevelPct, soilTempC
   );
 }
 
 float readSoilMoisture() {
-  // ADC range: ~4095 (dry) → ~1500 (wet) — calibrate for your sensor
-  const int DRY_VAL = 3500;
-  const int WET_VAL = 1200;
   int raw = analogRead(SOIL_MOISTURE_PIN);
-  float pct = map(raw, DRY_VAL, WET_VAL, 0, 100);
+  float pct = (float)(SOIL_DRY - raw) / (float)(SOIL_DRY - SOIL_WET) * 100.0f;
   return constrain(pct, 0.0f, 100.0f);
 }
 
-float measureWaterLevel() {
-  // HC-SR04 mounted at top of tank; distance to water surface measured.
-  // tankHeightCm set by calibration (empty tank = full distance to bottom).
-  digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(2);
+float measureWaterLevelPct() {
+  digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(4);
   digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000);
-  float distanceCm = duration * 0.0343f / 2.0f;
+  long duration = pulseIn(ECHO_PIN, HIGH, 100000UL);
+  delay(10);
+  if (duration <= 0) return 0;
+
+  float distanceCm = duration * 0.034f / 2.0f;
   if (distanceCm <= 0 || distanceCm > tankHeightCm) return 0;
-  return constrain(tankHeightCm - distanceCm, 0.0f, tankHeightCm);
+
+  float pct = ((tankHeightCm - distanceCm) / tankHeightCm) * 100.0f;
+  return constrain(pct, 0.0f, 100.0f);
 }
 
 // ─── Firebase Upload ───────────────────────────────────────────────────────
@@ -227,19 +254,17 @@ void uploadSensors() {
   String path = "/sensors/" + String(USER_UID) + "/latest";
 
   FirebaseJson json;
-  json.set("soilMoisture", soilMoisturePct);
-  json.set("airTemp",      airTempC);
-  json.set("humidity",     humidityPct);
-  json.set("lightLux",     lightLux);
-  json.set("waterLevelCm", waterLevelCm);
-  json.set("soilTemp",     soilTempC);
-  json.set("pumpStatus",   pumpRunning);
-  json.set("lastUpdated",  (int)(epochTime() * 1000LL));
+  json.set("soilMoisture",  soilMoisturePct);
+  json.set("airTemp",       airTempC);
+  json.set("humidity",      humidityPct);
+  json.set("lightLux",      lightLux);
+  json.set("waterLevelPct", waterLevelPct);   // key changed from waterLevelCm
+  json.set("soilTemp",      soilTempC);
+  json.set("pumpStatus",    pumpRunning);
+  json.set("lastUpdated",   epochMillis());
 
   if (Firebase.setJSON(fbData, path, json)) {
-    Serial.println("Sensor data uploaded");
-
-    // Also push to history
+    Serial.println("Uploaded OK");
     String histPath = "/sensors/" + String(USER_UID) + "/history";
     Firebase.pushJSON(fbData, histPath, json);
   } else {
@@ -259,10 +284,7 @@ void checkPumpCommand() {
       setPump(true);
     } else if (pumpCommand == "off") {
       setPump(false);
-    }
-    // "auto" = controlled by schedules / soil moisture threshold
-    else if (pumpCommand == "auto") {
-      // Auto-irrigate if soil too dry
+    } else if (pumpCommand == "auto") {
       if (soilMoisturePct < SOIL_DRY_THRESHOLD && !pumpRunning) {
         setPump(true);
       } else if (soilMoisturePct >= SOIL_DRY_THRESHOLD + 5 && pumpRunning) {
@@ -275,16 +297,15 @@ void checkPumpCommand() {
 void setPump(bool on) {
   if (pumpRunning == on) return;
   pumpRunning = on;
-  digitalWrite(RELAY_PIN, on ? LOW : HIGH); // active-low relay
+  digitalWrite(RELAY_PIN, on ? HIGH : LOW);
 
-  // Update pump status in Firebase
   String path = "/sensors/" + String(USER_UID) + "/latest/pumpStatus";
   Firebase.setBool(fbData, path, pumpRunning);
 
   Serial.println(String("Pump ") + (on ? "ON" : "OFF"));
   sendFirebaseAlert(
     on ? "pumpOn" : "pumpOff",
-    on ? "💧 Water pump turned ON" : "🔴 Water pump turned OFF"
+    on ? "Water pump turned ON" : "Water pump turned OFF"
   );
 }
 
@@ -292,20 +313,17 @@ void setPump(bool on) {
 void checkSchedules() {
   if (!Firebase.ready()) return;
 
-  // Fetch all schedules for this user
   String path = "/schedules/" + String(USER_UID);
   if (!Firebase.getJSON(fbData, path)) return;
 
   FirebaseJson schedJson;
   schedJson.setJsonData(fbData.jsonString());
-  FirebaseJsonData result;
   size_t count = schedJson.iteratorBegin();
 
-  // Get current time (hour/minute)
-  unsigned long t = epochTime();
+  unsigned long t   = localEpochTime();
   int currentHour   = (t % 86400) / 3600;
   int currentMinute = (t % 3600)  / 60;
-  int currentDow    = ((t / 86400) + 4) % 7 + 1; // 1=Mon…7=Sun (ISO)
+  int currentDow    = ((t / 86400) + 3) % 7 + 1;
 
   for (size_t i = 0; i < count; i++) {
     String key, value;
@@ -326,7 +344,6 @@ void checkSchedules() {
     if (hour.intValue != currentHour) continue;
     if (minute.intValue != currentMinute) continue;
 
-    // Check day of week
     bool dayMatch = false;
     FirebaseJsonArray daysArr;
     days.get<FirebaseJsonArray>(daysArr);
@@ -337,12 +354,11 @@ void checkSchedules() {
     }
     if (!dayMatch) continue;
 
-    // Fire the schedule
-    Serial.println("Schedule triggered! Duration: " + String(duration.intValue) + "s");
+    Serial.println("Schedule triggered! " + String(duration.intValue) + "s");
     setPump(true);
-    delay(duration.intValue * 1000UL);
+    delay((unsigned long)duration.intValue * 1000UL);
     setPump(false);
-    break; // only one schedule per minute
+    break;
   }
 
   schedJson.iteratorEnd();
@@ -355,15 +371,15 @@ void checkAlertConditions() {
   static bool prevHighTemp = false;
 
   bool drySoil  = soilMoisturePct < SOIL_DRY_THRESHOLD;
-  bool lowWater = waterLevelCm    < WATER_LOW_THRESHOLD;
+  bool lowWater = waterLevelPct   < WATER_LOW_THRESHOLD;
   bool highTemp = airTempC        > TEMP_HIGH_THRESHOLD;
 
-  if (drySoil && !prevDrySoil)
-    sendFirebaseAlert("drysoil",  "🌱 Soil moisture low (" + String(soilMoisturePct, 1) + "%)");
+  if (drySoil  && !prevDrySoil)
+    sendFirebaseAlert("drysoil",  "Soil moisture low (" + String(soilMoisturePct, 1) + "%)");
   if (lowWater && !prevLowWater)
-    sendFirebaseAlert("lowWater", "💧 Water tank low (" + String(waterLevelCm, 1) + " cm)");
+    sendFirebaseAlert("lowWater", "Water tank low (" + String(waterLevelPct, 1) + "%)");
   if (highTemp && !prevHighTemp)
-    sendFirebaseAlert("highTemp", "🌡️ High temperature alert (" + String(airTempC, 1) + "°C)");
+    sendFirebaseAlert("highTemp", "High temperature (" + String(airTempC, 1) + "C)");
 
   prevDrySoil  = drySoil;
   prevLowWater = lowWater;
@@ -376,7 +392,7 @@ void sendFirebaseAlert(const String& type, const String& msg) {
   FirebaseJson alertJson;
   alertJson.set("type",      type);
   alertJson.set("message",   msg);
-  alertJson.set("timestamp", (int)(epochTime() * 1000LL));
+  alertJson.set("timestamp", epochMillis());
   alertJson.set("read",      false);
 
   String path = "/alerts/" + String(USER_UID);
@@ -391,7 +407,7 @@ void updateLCD() {
   switch (lcdPage) {
     case 0:
       lcd.setCursor(0, 0); lcd.print("Soil: " + String(soilMoisturePct, 1) + "%");
-      lcd.setCursor(0, 1); lcd.print("Water:" + String(waterLevelCm, 1) + "cm");
+      lcd.setCursor(0, 1); lcd.print("Water:" + String(waterLevelPct, 1) + "%");  // % not cm
       break;
     case 1:
       lcd.setCursor(0, 0); lcd.print("Temp: " + String(airTempC, 1) + "\xDF""C");
@@ -413,10 +429,9 @@ void updateLCD() {
 void checkSettingsAndCalibration() {
   if (!Firebase.ready()) return;
 
-  // Read thresholds from Firebase (set by app)
   String tPath = "/users/" + String(USER_UID) + "/settings/thresholds";
-  FirebaseJson tJson;
   if (Firebase.getJSON(fbData, tPath)) {
+    FirebaseJson tJson;
     tJson.setJsonData(fbData.jsonString());
     FirebaseJsonData val;
     if (tJson.get(val, "soilDry"))  SOIL_DRY_THRESHOLD  = val.floatValue;
@@ -424,47 +439,52 @@ void checkSettingsAndCalibration() {
     if (tJson.get(val, "tempHigh")) TEMP_HIGH_THRESHOLD = val.floatValue;
   }
 
-  // Check calibration trigger
   String calPath = "/calibration/" + String(USER_UID) + "/calibrateNow";
   if (Firebase.getBool(fbData, calPath) && fbData.boolData()) {
-    Serial.println("Calibration triggered — measuring empty tank...");
+    Serial.println("Calibrating tank (empty)...");
 
-    // Take 5 readings and average for accuracy
+    lcd.clear();
+    lcd.setCursor(0, 0); lcd.print("Calibrating...");
+    lcd.setCursor(0, 1); lcd.print("Keep tank empty!");
+
     float total = 0;
     int valid   = 0;
     for (int i = 0; i < 5; i++) {
-      digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(2);
+      digitalWrite(TRIG_PIN, LOW);  delayMicroseconds(4);
       digitalWrite(TRIG_PIN, HIGH); delayMicroseconds(10);
       digitalWrite(TRIG_PIN, LOW);
-      long dur = pulseIn(ECHO_PIN, HIGH, 30000);
-      float d  = dur * 0.0343f / 2.0f;
+      long dur = pulseIn(ECHO_PIN, HIGH, 100000UL);
+      delay(10);
+      float d  = dur * 0.034f / 2.0f;
       if (d > 1.0f && d < 400.0f) { total += d; valid++; }
       delay(200);
     }
 
+    String basePath = "/calibration/" + String(USER_UID);
+
     if (valid > 0) {
       tankHeightCm = total / valid;
-      Serial.printf("Calibrated tank height: %.1f cm\n", tankHeightCm);
+      Serial.printf("Tank height: %.1f cm\n", tankHeightCm);
 
-      // Save result to Firebase and clear the trigger
-      String basePath = "/calibration/" + String(USER_UID);
-      Firebase.setFloat(fbData, basePath + "/tankHeightCm", tankHeightCm);
-      Firebase.setBool(fbData,  basePath + "/calibrateNow", false);
-      Firebase.setInt(fbData,   basePath + "/calibratedAt",
-                      (int)(epochTime() * 1000LL));
+      Firebase.setFloat(fbData,  basePath + "/tankHeightCm", tankHeightCm);
+      Firebase.setBool(fbData,   basePath + "/calibrateNow", false);
+      Firebase.setDouble(fbData, basePath + "/calibratedAt", (double)epochMillis());
 
       lcd.clear();
-      lcd.setCursor(0, 0); lcd.print("Tank calibrated!");
-      lcd.setCursor(0, 1); lcd.print(String(tankHeightCm, 1) + " cm");
+      lcd.setCursor(0, 0); lcd.print("Calibrated!");
+      lcd.setCursor(0, 1); lcd.print("Height:" + String(tankHeightCm, 1) + "cm");
       delay(3000);
     } else {
-      Serial.println("Calibration failed — no valid readings");
-      Firebase.setBool(fbData,
-        "/calibration/" + String(USER_UID) + "/calibrateNow", false);
+      Serial.println("Calibration failed — no echo");
+      Firebase.setBool(fbData, basePath + "/calibrateNow", false);
+      lcd.clear();
+      lcd.setCursor(0, 0); lcd.print("Cal FAILED!");
+      lcd.setCursor(0, 1); lcd.print("Check sensor");
+      delay(3000);
     }
   }
 
-  // Load saved tank height if available (persists across reboots)
+  // Load saved tank height
   String heightPath = "/calibration/" + String(USER_UID) + "/tankHeightCm";
   if (Firebase.getFloat(fbData, heightPath) && fbData.floatData() > 0) {
     tankHeightCm = fbData.floatData();
@@ -473,6 +493,15 @@ void checkSettingsAndCalibration() {
 
 // ─── NTP Time ─────────────────────────────────────────────────────────────
 unsigned long epochTime() {
-  // Firebase ESP library provides epoch via SSL; fall back to millis/1000
-  return (unsigned long)(Firebase.getCurrentTime());
+  time_t now;
+  time(&now);
+  return (unsigned long)now;
+}
+
+unsigned long localEpochTime() {
+  return epochTime() + (8L * 3600L);  // UTC+8 Malaysia
+}
+
+unsigned long long epochMillis() {
+  return (unsigned long long)epochTime() * 1000ULL;
 }

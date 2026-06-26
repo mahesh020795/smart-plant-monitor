@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'providers/app_provider.dart';
@@ -32,40 +33,98 @@ class SmartPlantApp extends StatelessWidget {
     );
   }
 
-  ThemeData _theme() => ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2E7D32),
-          brightness: Brightness.light,
+  ThemeData _theme() {
+    const seedColor = Color(0xFF16A34A);
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: seedColor,
+        brightness: Brightness.light,
+        primary: const Color(0xFF16A34A),
+        secondary: const Color(0xFF22C55E),
+        surface: Colors.white,
         ),
-        cardTheme: CardTheme(
-          elevation: 3,
-          shadowColor: Colors.black26,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    );
+
+    return base.copyWith(
+      textTheme: GoogleFonts.poppinsTextTheme(base.textTheme),
+      scaffoldBackgroundColor: Colors.white,
+      cardTheme: CardTheme(
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        color: Colors.white,
+      ),
+      appBarTheme: AppBarTheme(
+        centerTitle: false,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF111827),
+        titleTextStyle: GoogleFonts.poppins(
+          color: const Color(0xFF111827),
+          fontWeight: FontWeight.w700,
+          fontSize: 17,
         ),
-        appBarTheme: const AppBarTheme(
-          centerTitle: true,
-          elevation: 0,
-          scrolledUnderElevation: 1,
+        iconTheme: const IconThemeData(color: Color(0xFF374151)),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        shadowColor: Colors.black12,
+        indicatorColor: const Color(0xFFDCFCE7),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const IconThemeData(color: Color(0xFF16A34A), size: 22);
+          }
+          return const IconThemeData(color: Color(0xFF9CA3AF), size: 22);
+        }),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return GoogleFonts.poppins(
+              color: const Color(0xFF16A34A),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            );
+          }
+          return GoogleFonts.poppins(
+            color: const Color(0xFF9CA3AF),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          );
+        }),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        height: 68,
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF16A34A),
+          foregroundColor: Colors.white,
+          minimumSize: const Size.fromHeight(50),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
         ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(50),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xFFF1F5F9),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
         ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
         ),
-      );
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFF16A34A), width: 1.5),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        hintStyle: GoogleFonts.poppins(color: const Color(0xFF9CA3AF), fontSize: 14),
+      ),
+    );
+  }
 }
 
 class _AuthGate extends StatelessWidget {
@@ -80,7 +139,6 @@ class _AuthGate extends StatelessWidget {
           return const SplashScreen();
         }
         if (snapshot.hasData) {
-          // Start real-time listeners when logged in
           context.read<AppProvider>().startListening();
           return const NavShell();
         }

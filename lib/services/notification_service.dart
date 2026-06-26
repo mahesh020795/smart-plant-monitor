@@ -53,6 +53,20 @@ class NotificationService {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   }
 
+  Future<void> showLocalAlert(String title, String body) async {
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        'plant_alerts',
+        'Plant Alerts',
+        channelDescription: 'Smart plant monitoring alerts',
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: '@mipmap/ic_launcher',
+      ),
+    );
+    await _local.show(DateTime.now().millisecondsSinceEpoch ~/ 1000, title, body, details);
+  }
+
   Future<void> _showLocalNotification(RemoteMessage message) async {
     final notification = message.notification;
     if (notification == null) return;

@@ -26,7 +26,7 @@ class NotificationsScreen extends StatelessWidget {
       body: alerts.isEmpty
           ? _EmptyView()
           : ListView.separated(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 100),
               itemCount: alerts.length,
               separatorBuilder: (_, __) => const SizedBox(height: 4),
               itemBuilder: (ctx, i) => _AlertTile(alert: alerts[i]),

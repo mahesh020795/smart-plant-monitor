@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import '../../providers/app_provider.dart';
 import '../../services/auth_service.dart';
@@ -17,6 +18,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _name = '';
   String _email = '';
   bool _loadingProfile = true;
+  String _version = '';
+  String _buildNumber = '';
 
   double _soilDry  = 30.0;
   double _waterLow = 5.0;
@@ -32,6 +35,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadAll();
     _listenCalibration();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() {
+        _version = info.version;
+        _buildNumber = info.buildNumber;
+      });
+    }
   }
 
   Future<void> _loadAll() async {
@@ -51,21 +65,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _listenCalibration() {
-    DatabaseService.instance.calibrationStream().listen((data) {
-      if (data == null || !mounted) return;
-      final height   = (data['tankHeightCm'] as num?)?.toDouble();
-      final inProg   = data['calibrateNow'] as bool? ?? false;
-      setState(() {
-        _calibratedHeight = height;
-        if (inProg) {
-          _calibrating = true;
-          _calibStatus = 'Waiting for ESP32 to measure…';
-        } else if (height != null && _calibrating) {
-          _calibrating = false;
-          _calibStatus = 'Calibrated! Tank height = ${height.toStringAsFixed(1)} cm';
-        }
-      });
-    });
+    DatabaseService.instance.calibrationStream().listen(
+      (data) {
+        if (data == null || !mounted) return;
+        final height = (data['tankHeightCm'] as num?)?.toDouble();
+        final inProg = data['calibrateNow'] as bool? ?? false;
+        setState(() {
+          _calibratedHeight = height;
+          if (inProg) {
+            _calibrating = true;
+            _calibStatus = 'Waiting for ESP32 to measure…';
+          } else if (height != null && _calibrating) {
+            _calibrating = false;
+            _calibStatus = 'Calibrated! Tank height = ${height.toStringAsFixed(1)} cm';
+          }
+        });
+      },
+      onError: (e) {
+        // Firebase rules may not include /calibration yet — non-fatal
+        if (mounted) setState(() => _calibrating = false);
+      },
+    );
   }
 
   Future<void> _editName() async {
@@ -209,7 +229,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: _loadingProfile
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
               children: [
                 // ── Profile ──────────────────────────────────────────────
                 Card(
@@ -461,13 +481,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 32),
-                Center(
-                  child: Text(
-                    'Smart Plant Monitor v1.0.0',
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                const SizedBox(height: 16),
+
+                // ── About ─────────────────────────────────────────────────
+                _sectionTitle(context, 'About'),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primaryContainer,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Icon(Icons.eco_rounded,
+                              color: Theme.of(context).colorScheme.primary, size: 28),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Smart Plant Monitor',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.bold, fontSize: 15)),
+                              const SizedBox(height: 2),
+                              Text(
+                                _version.isNotEmpty
+                                    ? 'Version $_version (build $_buildNumber)'
+                                    : 'Version 1.0.0',
+                                style: TextStyle(
+                                    color: Colors.grey[600], fontSize: 13),
+                              ),
+                              const SizedBox(height: 4),
+                              Text('ESP32 · Firebase · Flutter',
+                                  style: TextStyle(
+                                      color: Colors.grey[400], fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                const SizedBox(height: 32),
               ],
             ),
     );

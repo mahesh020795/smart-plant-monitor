@@ -23,7 +23,7 @@ class ScheduleScreen extends StatelessWidget {
       body: schedules.isEmpty
           ? _EmptyView(onAdd: () => _openScheduleDialog(context, null))
           : ListView.separated(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
               itemCount: schedules.length,
               separatorBuilder: (_, __) => const SizedBox(height: 8),
               itemBuilder: (ctx, i) =>

@@ -3,7 +3,7 @@ class SensorData {
   final double airTempC;
   final double humidityPct;
   final double lightLux;
-  final double waterLevelCm;
+  final double waterLevelPct;
   final double soilTempC;
   final bool pumpRunning;
   final DateTime lastUpdated;
@@ -13,7 +13,7 @@ class SensorData {
     required this.airTempC,
     required this.humidityPct,
     required this.lightLux,
-    required this.waterLevelCm,
+    required this.waterLevelPct,
     required this.soilTempC,
     required this.pumpRunning,
     required this.lastUpdated,
@@ -25,11 +25,11 @@ class SensorData {
       airTempC: (map['airTemp'] as num?)?.toDouble() ?? 0,
       humidityPct: (map['humidity'] as num?)?.toDouble() ?? 0,
       lightLux: (map['lightLux'] as num?)?.toDouble() ?? 0,
-      waterLevelCm: (map['waterLevelCm'] as num?)?.toDouble() ?? 0,
+      waterLevelPct: (map['waterLevelPct'] as num?)?.toDouble() ?? 0,
       soilTempC: (map['soilTemp'] as num?)?.toDouble() ?? 0,
       pumpRunning: (map['pumpStatus'] as bool?) ?? false,
       lastUpdated: map['lastUpdated'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['lastUpdated'] as int)
+          ? DateTime.fromMillisecondsSinceEpoch((map['lastUpdated'] as num).toInt())
           : DateTime.now(),
     );
   }
@@ -39,7 +39,7 @@ class SensorData {
         'airTemp': airTempC,
         'humidity': humidityPct,
         'lightLux': lightLux,
-        'waterLevelCm': waterLevelCm,
+        'waterLevelPct': waterLevelPct,
         'soilTemp': soilTempC,
         'pumpStatus': pumpRunning,
         'lastUpdated': lastUpdated.millisecondsSinceEpoch,
@@ -50,7 +50,7 @@ class SensorData {
         airTempC: airTempC,
         humidityPct: humidityPct,
         lightLux: lightLux,
-        waterLevelCm: waterLevelCm,
+        waterLevelPct: waterLevelPct,
         soilTempC: soilTempC,
         pumpRunning: pumpRunning ?? this.pumpRunning,
         lastUpdated: lastUpdated,

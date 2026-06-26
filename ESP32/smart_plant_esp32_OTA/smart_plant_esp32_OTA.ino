@@ -47,7 +47,7 @@
 
 // ─── Firmware Version ─────────────────────────────────────────────────────
 // !! IMPORTANT: Update this every time you flash a new version !!
-#define FIRMWARE_VERSION  "1.0.2"
+#define FIRMWARE_VERSION  "1.0.3"
 
 // ─── GitHub OTA URLs ──────────────────────────────────────────────────────
 #define GITHUB_USERNAME   "mahesh020795"
@@ -165,8 +165,8 @@ void setup() {
 
   lcd.init();
   lcd.backlight();
-  lcd.setCursor(0, 0); lcd.print("Smart Plant");
-  lcd.setCursor(0, 1); lcd.print("v" FIRMWARE_VERSION);
+  lcd.setCursor(0, 0); lcd.print("** OTA READY **");
+  lcd.setCursor(0, 1); lcd.print("v" FIRMWARE_VERSION " - 10s");
   delay(1500);
 
   lcd.clear();

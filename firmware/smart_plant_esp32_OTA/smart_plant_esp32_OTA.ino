@@ -89,7 +89,7 @@ float TEMP_HIGH_THRESHOLD = 35.0;
 #define SCHEDULE_CHECK_MS     60000
 #define LCD_REFRESH_MS         3000
 #define SETTINGS_CHECK_MS     30000
-#define OTA_CHECK_MS        3600000   // check for OTA update every 1 hour
+// OTA only checks on boot (setup), not in loop
 
 // ─── Objects ──────────────────────────────────────────────────────────────
 FirebaseData   fbData;
@@ -118,7 +118,6 @@ unsigned long lastPumpCheck     = 0;
 unsigned long lastScheduleCheck = 0;
 unsigned long lastLcdRefresh    = 0;
 unsigned long lastSettingsCheck = 0;
-unsigned long lastOtaCheck      = 0;
 int           lcdPage           = 0;
 
 // ─── Prototypes ───────────────────────────────────────────────────────────
@@ -133,7 +132,7 @@ void     updateLCD();
 float    measureWaterLevelPct();
 float    readSoilMoisture();
 void     sendFirebaseAlert(const String& type, const String& msg);
-void     checkOTA();
+void     checkOTA();   // called once in setup()
 unsigned long epochTime();
 unsigned long localEpochTime();
 unsigned long long epochMillis();
@@ -241,10 +240,6 @@ void loop() {
     checkSettingsAndCalibration();
   }
 
-  if (now - lastOtaCheck >= OTA_CHECK_MS) {
-    lastOtaCheck = now;
-    checkOTA();
-  }
 }
 
 // ─── OTA Update ───────────────────────────────────────────────────────────

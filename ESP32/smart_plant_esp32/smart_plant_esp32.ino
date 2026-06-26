@@ -1,17 +1,5 @@
 /*
- * Smart Plant Monitor — ESP32 Firmware WITH OTA
- *
- * OTA Update Flow:
- *  1. Compile firmware in Arduino IDE → Sketch → Export Compiled Binary → .bin file
- *  2. Create a GitHub Release and attach the .bin file
- *  3. Update version.txt in your repo root to the new version (e.g. "1.0.2")
- *  4. ESP32 checks version.txt on every boot and every hour
- *  5. If new version found → LCD shows progress → downloads .bin → flashes → reboots
- *
- * GitHub setup:
- *  - Repo:        github.com/YOUR_USERNAME/smart-plant-esp32
- *  - version.txt: raw URL = https://raw.githubusercontent.com/YOUR_USERNAME/smart-plant-esp32/main/version.txt
- *  - .bin URL:    https://github.com/YOUR_USERNAME/smart-plant-esp32/releases/latest/download/smart_plant_esp32.bin
+ * Smart Plant Monitor — ESP32 Firmware
  *
  * Hardware:
  *  - Soil Moisture Sensor → GPIO34 (ADC)
@@ -22,14 +10,13 @@
  *  - Relay (pump)        → GPIO2 (HIGH = pump ON for active-high relay)
  *  - I2C LCD 16x2        → SDA=GPIO21, SCL=GPIO22 (addr 0x27)
  *
- * Libraries (Arduino Library Manager):
+ * Libraries required (install via Arduino Library Manager):
  *  - DHT sensor library  (Adafruit)
  *  - BH1750              (Christopher Laws)
  *  - OneWire             (Paul Stoffregen)
  *  - DallasTemperature   (Miles Burton)
  *  - LiquidCrystal_I2C   (Frank de Brabander)
- *  - Firebase ESP Client (Mobizt)
- *  All OTA libraries (HTTPClient, HTTPUpdate, Update) are built into ESP32 Arduino core.
+ *  - Firebase ESP Client (Mobizt) — for RTDB
  */
 
 #include <WiFi.h>
@@ -41,31 +28,15 @@
 #include <DallasTemperature.h>
 #include <LiquidCrystal_I2C.h>
 #include <time.h>
-#include <HTTPClient.h>
-#include <HTTPUpdate.h>
 
-// ─── Firmware Version ─────────────────────────────────────────────────────
-// !! IMPORTANT: Update this every time you flash a new version !!
-#define FIRMWARE_VERSION  "1.0.2"
-
-// ─── GitHub OTA URLs ──────────────────────────────────────────────────────
-#define GITHUB_USERNAME   "mahesh020795"
-#define GITHUB_REPO       "smart-plant-monitor"
-
-// version.txt in repo root — update this on GitHub to trigger OTA
-#define OTA_VERSION_URL   "https://raw.githubusercontent.com/" GITHUB_USERNAME "/" GITHUB_REPO "/master/version.txt"
-
-// firmware.bin attached to the latest GitHub Release
-#define OTA_BIN_URL       "https://github.com/" GITHUB_USERNAME "/" GITHUB_REPO "/releases/latest/download/firmware.bin"
-
-// ─── WiFi + Firebase Config ───────────────────────────────────────────────
+// ─── WiFi + Firebase Config ────────────────────────────────────────────────
 #define WIFI_SSID       "project123"
 #define WIFI_PASSWORD   "01126502500"
 #define FIREBASE_HOST   "smart-plant-monitor-fdddf-default-rtdb.firebaseio.com"
 #define FIREBASE_AUTH   "Ph8QVKdtDnMzHKLWuPOwR5rH9uhWiTB67JdLkNbc"
 #define USER_UID        "b44mjHqSSeX7ayrZ68H08rPJ0bU2"
 
-// ─── Pin Definitions ──────────────────────────────────────────────────────
+// ─── Pin Definitions ───────────────────────────────────────────────────────
 #define SOIL_MOISTURE_PIN   34
 #define DHT_PIN             4
 #define DHT_TYPE            DHT11
@@ -78,20 +49,19 @@
 const int SOIL_DRY = 4095;
 const int SOIL_WET = 2100;
 
-// ─── Thresholds ───────────────────────────────────────────────────────────
-float SOIL_DRY_THRESHOLD  = 30.0;
-float WATER_LOW_THRESHOLD = 20.0;
-float TEMP_HIGH_THRESHOLD = 35.0;
+// ─── Thresholds (overridden from Firebase /users/{uid}/settings/thresholds) ──
+float SOIL_DRY_THRESHOLD  = 30.0;  // %
+float WATER_LOW_THRESHOLD = 20.0;  // % (was cm, now percentage)
+float TEMP_HIGH_THRESHOLD = 35.0;  // °C
 
-// ─── Intervals ────────────────────────────────────────────────────────────
-#define SENSOR_INTERVAL_MS    10000
+// ─── Intervals ─────────────────────────────────────────────────────────────
+#define SENSOR_INTERVAL_MS    30000
 #define PUMP_CHECK_MS          5000
 #define SCHEDULE_CHECK_MS     60000
 #define LCD_REFRESH_MS         3000
 #define SETTINGS_CHECK_MS     30000
-// OTA only checks on boot (setup), not in loop
 
-// ─── Objects ──────────────────────────────────────────────────────────────
+// ─── Objects ───────────────────────────────────────────────────────────────
 FirebaseData   fbData;
 FirebaseConfig fbConfig;
 FirebaseAuth   fbAuth;
@@ -102,12 +72,12 @@ OneWire       oneWire(DS18B20_PIN);
 DallasTemperature ds18b20(&oneWire);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// ─── State ────────────────────────────────────────────────────────────────
+// ─── State ─────────────────────────────────────────────────────────────────
 float soilMoisturePct = 0;
 float airTempC        = 0;
 float humidityPct     = 0;
 float lightLux        = 0;
-float waterLevelPct   = 0;
+float waterLevelPct   = 0;   // 0–100 %
 float soilTempC       = 0;
 float tankHeightCm    = 25.0;
 bool  pumpRunning     = false;
@@ -120,7 +90,7 @@ unsigned long lastLcdRefresh    = 0;
 unsigned long lastSettingsCheck = 0;
 int           lcdPage           = 0;
 
-// ─── Prototypes ───────────────────────────────────────────────────────────
+// ─── Prototypes ────────────────────────────────────────────────────────────
 void     readSensors();
 void     uploadSensors();
 void     checkPumpCommand();
@@ -132,7 +102,6 @@ void     updateLCD();
 float    measureWaterLevelPct();
 float    readSoilMoisture();
 void     sendFirebaseAlert(const String& type, const String& msg);
-void     checkOTA();   // called once in setup()
 unsigned long epochTime();
 unsigned long localEpochTime();
 unsigned long long epochMillis();
@@ -154,21 +123,16 @@ void setup() {
   if (lightMeter.begin()) {
     Serial.println("[BH1750] OK");
   } else {
-    Serial.println("[BH1750] FAIL");
+    Serial.println("[BH1750] FAIL - check SDA(21)/SCL(22) wiring");
   }
 
   int dsCount = ds18b20.getDeviceCount();
   Serial.println(dsCount > 0
     ? "[DS18B20] OK - " + String(dsCount) + " device(s)"
-    : "[DS18B20] FAIL");
+    : "[DS18B20] FAIL - check GPIO15 + 4.7k pullup");
 
   lcd.init();
   lcd.backlight();
-  lcd.setCursor(0, 0); lcd.print("Smart Plant");
-  lcd.setCursor(0, 1); lcd.print("v" FIRMWARE_VERSION);
-  delay(1500);
-
-  lcd.clear();
   lcd.setCursor(0, 0); lcd.print("Smart Plant");
   lcd.setCursor(0, 1); lcd.print("Connecting WiFi");
 
@@ -179,19 +143,19 @@ void setup() {
   }
   Serial.println("\nWiFi: " + WiFi.localIP().toString());
 
-  // NTP time sync
+  // NTP time sync (pool.ntp.org, UTC)
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   lcd.clear();
   lcd.setCursor(0, 0); lcd.print("Syncing time...");
   struct tm ti;
   int retry = 0;
   while (!getLocalTime(&ti) && retry < 20) { delay(500); retry++; }
-  Serial.println(retry < 20 ? "[NTP] Synced" : "[NTP] Failed");
+  if (retry < 20) {
+    Serial.println("[NTP] Time synced");
+  } else {
+    Serial.println("[NTP] Sync failed - timestamps may be wrong");
+  }
 
-  // OTA check on boot
-  checkOTA();
-
-  // Firebase
   fbConfig.host = FIREBASE_HOST;
   fbConfig.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&fbConfig, &fbAuth);
@@ -203,7 +167,7 @@ void setup() {
   lcd.setCursor(0, 1); lcd.print(WiFi.localIP().toString());
   delay(2000);
 
-  // Read sensors immediately on boot
+  // Read and upload immediately on boot (no 30s wait)
   readSensors();
   uploadSensors();
   checkAlertConditions();
@@ -239,97 +203,9 @@ void loop() {
     lastSettingsCheck = now;
     checkSettingsAndCalibration();
   }
-
 }
 
-// ─── OTA Update ───────────────────────────────────────────────────────────
-void checkOTA() {
-  Serial.println("[OTA] Checking for update...");
-  lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("OTA Check...");
-  lcd.setCursor(0, 1); lcd.print("v" FIRMWARE_VERSION);
-
-  HTTPClient http;
-  http.begin(OTA_VERSION_URL);
-  int code = http.GET();
-
-  if (code != 200) {
-    Serial.println("[OTA] Could not reach version.txt (code " + String(code) + ")");
-    http.end();
-    return;
-  }
-
-  String latestVersion = http.getString();
-  latestVersion.trim();
-  http.end();
-
-  Serial.println("[OTA] Current: " FIRMWARE_VERSION " | Latest: " + latestVersion);
-
-  if (latestVersion == FIRMWARE_VERSION) {
-    Serial.println("[OTA] Already up to date");
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("OTA: Up to date");
-    lcd.setCursor(0, 1); lcd.print("v" FIRMWARE_VERSION);
-    delay(2000);
-    return;
-  }
-
-  // New version available — download and flash
-  Serial.println("[OTA] New version " + latestVersion + " found! Updating...");
-  lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("New: v" + latestVersion);
-  lcd.setCursor(0, 1); lcd.print("Downloading...");
-
-  // OTA progress callback — updates LCD with percentage
-  httpUpdate.onProgress([](int cur, int total) {
-    if (total > 0) {
-      int pct = (cur * 100) / total;
-      lcd.setCursor(0, 1);
-      String bar = "";
-      int filled = pct / 10;
-      for (int i = 0; i < 10; i++) bar += (i < filled ? '\xFF' : '-');
-      lcd.print(bar + " " + String(pct) + "%");
-    }
-  });
-
-  httpUpdate.onStart([]() {
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("Flashing...");
-  });
-
-  httpUpdate.onEnd([]() {
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("Flash OK!");
-    lcd.setCursor(0, 1); lcd.print("Rebooting...");
-    delay(2000);
-  });
-
-  httpUpdate.onError([](int err) {
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("OTA FAILED!");
-    lcd.setCursor(0, 1); lcd.print("Err: " + String(err));
-    Serial.println("[OTA] Error: " + String(err));
-    delay(3000);
-  });
-
-  WiFiClient client;
-  t_httpUpdate_return result = httpUpdate.update(client, OTA_BIN_URL);
-
-  switch (result) {
-    case HTTP_UPDATE_OK:
-      Serial.println("[OTA] Success — rebooting");
-      ESP.restart();
-      break;
-    case HTTP_UPDATE_NO_UPDATES:
-      Serial.println("[OTA] No update needed");
-      break;
-    case HTTP_UPDATE_FAILED:
-      Serial.println("[OTA] Failed: " + httpUpdate.getLastErrorString());
-      break;
-  }
-}
-
-// ─── Sensor Reading ───────────────────────────────────────────────────────
+// ─── Sensor Reading ────────────────────────────────────────────────────────
 void readSensors() {
   float h = dht.readHumidity();
   float t = dht.readTemperature();
@@ -371,7 +247,7 @@ float measureWaterLevelPct() {
   return constrain(pct, 0.0f, 100.0f);
 }
 
-// ─── Firebase Upload ──────────────────────────────────────────────────────
+// ─── Firebase Upload ───────────────────────────────────────────────────────
 void uploadSensors() {
   if (!Firebase.ready()) return;
 
@@ -382,10 +258,9 @@ void uploadSensors() {
   json.set("airTemp",       airTempC);
   json.set("humidity",      humidityPct);
   json.set("lightLux",      lightLux);
-  json.set("waterLevelPct", waterLevelPct);
+  json.set("waterLevelPct", waterLevelPct);   // key changed from waterLevelCm
   json.set("soilTemp",      soilTempC);
   json.set("pumpStatus",    pumpRunning);
-  json.set("fwVersion",     FIRMWARE_VERSION);
   json.set("lastUpdated",   epochMillis());
 
   if (Firebase.setJSON(fbData, path, json)) {
@@ -397,7 +272,7 @@ void uploadSensors() {
   }
 }
 
-// ─── Pump Command ─────────────────────────────────────────────────────────
+// ─── Pump Command ──────────────────────────────────────────────────────────
 void checkPumpCommand() {
   if (!Firebase.ready()) return;
 
@@ -479,12 +354,6 @@ void checkSchedules() {
     }
     if (!dayMatch) continue;
 
-    // Respect manual OFF — skip schedule if user manually stopped pump
-    if (pumpCommand == "off") {
-      Serial.println("Schedule skipped — manual OFF active");
-      break;
-    }
-
     Serial.println("Schedule triggered! " + String(duration.intValue) + "s");
     setPump(true);
     delay((unsigned long)duration.intValue * 1000UL);
@@ -538,7 +407,7 @@ void updateLCD() {
   switch (lcdPage) {
     case 0:
       lcd.setCursor(0, 0); lcd.print("Soil: " + String(soilMoisturePct, 1) + "%");
-      lcd.setCursor(0, 1); lcd.print("Water:" + String(waterLevelPct, 1) + "%");
+      lcd.setCursor(0, 1); lcd.print("Water:" + String(waterLevelPct, 1) + "%");  // % not cm
       break;
     case 1:
       lcd.setCursor(0, 0); lcd.print("Temp: " + String(airTempC, 1) + "\xDF""C");
@@ -550,7 +419,7 @@ void updateLCD() {
       break;
     case 3:
       lcd.setCursor(0, 0); lcd.print("SoilT:" + String(soilTempC, 1) + "\xDF""C");
-      lcd.setCursor(0, 1); lcd.print(WiFi.isConnected() ? "FW:v" FIRMWARE_VERSION : "WiFi: --");
+      lcd.setCursor(0, 1); lcd.print(WiFi.isConnected() ? "WiFi: OK" : "WiFi: --");
       break;
   }
   lcdPage = (lcdPage + 1) % 4;
@@ -573,6 +442,7 @@ void checkSettingsAndCalibration() {
   String calPath = "/calibration/" + String(USER_UID) + "/calibrateNow";
   if (Firebase.getBool(fbData, calPath) && fbData.boolData()) {
     Serial.println("Calibrating tank (empty)...");
+
     lcd.clear();
     lcd.setCursor(0, 0); lcd.print("Calibrating...");
     lcd.setCursor(0, 1); lcd.print("Keep tank empty!");
@@ -585,24 +455,27 @@ void checkSettingsAndCalibration() {
       digitalWrite(TRIG_PIN, LOW);
       long dur = pulseIn(ECHO_PIN, HIGH, 100000UL);
       delay(10);
-      float d = dur * 0.034f / 2.0f;
+      float d  = dur * 0.034f / 2.0f;
       if (d > 1.0f && d < 400.0f) { total += d; valid++; }
       delay(200);
     }
 
     String basePath = "/calibration/" + String(USER_UID);
+
     if (valid > 0) {
       tankHeightCm = total / valid;
       Serial.printf("Tank height: %.1f cm\n", tankHeightCm);
+
       Firebase.setFloat(fbData,  basePath + "/tankHeightCm", tankHeightCm);
       Firebase.setBool(fbData,   basePath + "/calibrateNow", false);
       Firebase.setDouble(fbData, basePath + "/calibratedAt", (double)epochMillis());
+
       lcd.clear();
       lcd.setCursor(0, 0); lcd.print("Calibrated!");
       lcd.setCursor(0, 1); lcd.print("Height:" + String(tankHeightCm, 1) + "cm");
       delay(3000);
     } else {
-      Serial.println("Calibration failed");
+      Serial.println("Calibration failed — no echo");
       Firebase.setBool(fbData, basePath + "/calibrateNow", false);
       lcd.clear();
       lcd.setCursor(0, 0); lcd.print("Cal FAILED!");
@@ -611,6 +484,7 @@ void checkSettingsAndCalibration() {
     }
   }
 
+  // Load saved tank height
   String heightPath = "/calibration/" + String(USER_UID) + "/tankHeightCm";
   if (Firebase.getFloat(fbData, heightPath) && fbData.floatData() > 0) {
     tankHeightCm = fbData.floatData();
@@ -625,7 +499,7 @@ unsigned long epochTime() {
 }
 
 unsigned long localEpochTime() {
-  return epochTime() + (8L * 3600L);
+  return epochTime() + (8L * 3600L);  // UTC+8 Malaysia
 }
 
 unsigned long long epochMillis() {
